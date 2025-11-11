@@ -5,3 +5,5 @@ venv/
 # Python キャッシュ
 __pycache__/
 *.pyc
+data/
+results/
