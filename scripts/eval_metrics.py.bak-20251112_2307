@@ -1,0 +1,115 @@
+#!/usr/bin/env python
+import argparse
+import csv
+from pathlib import Path
+
+import numpy as np
+import soundfile as sf
+
+
+def snr_db(clean: np.ndarray, noisy: np.ndarray) -> float:
+    """単純なフルバンド SNR[dB] を計算します。"""
+    clean = clean.astype(np.float64)
+    noisy = noisy.astype(np.float64)
+    noise = noisy - clean
+    num = np.sum(clean ** 2)
+    den = np.sum(noise ** 2) + 1e-12
+    return 10.0 * np.log10(num / den)
+
+
+def eval_pair(clean_path: Path, denoised_path: Path) -> dict:
+    clean, sr_c = sf.read(clean_path)
+    den, sr_d = sf.read(denoised_path)
+
+    if sr_c != sr_d:
+        raise ValueError(f"Sample rate mismatch: {sr_c} vs {sr_d}")
+
+    # 長さを合わせる
+    n = min(len(clean), len(den))
+    clean = clean[:n]
+    den = den[:n]
+
+    snr = snr_db(clean, den)
+
+    # ここに PESQ/STOI/DNSMOS 等を追加する場合:
+    # pesq_val = calc_pesq(sr_c, clean, den)
+    # stoi_val = calc_stoi(clean, den, sr_c)
+    # dnsmos_val = calc_dnsmos(den, sr_c)
+    # といった形で拡張する
+
+    return {
+        "clean": str(clean_path),
+        "denoised": str(denoised_path),
+        "snr_db": snr,
+        # "pesq": pesq_val,
+        # "stoi": stoi_val,
+        # "dnsmos": dnsmos_val,
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Evaluate denoising metrics")
+    parser.add_argument(
+        "--clean_dir",
+        type=str,
+        default="data/processed",
+        help="クリーン音声が入っているディレクトリ",
+    )
+    parser.add_argument(
+        "--denoised_dir",
+        type=str,
+        default="results/denoised",
+        help="復元音声が入っているディレクトリ",
+    )
+    parser.add_argument(
+        "--output_csv",
+        type=str,
+        default="results/tables/metrics.csv",
+        help="メトリクスを書き出す CSV",
+    )
+    args = parser.parse_args()
+
+    clean_dir = Path(args.clean_dir)
+    denoised_dir = Path(args.denoised_dir)
+    out_csv = Path(args.output_csv)
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+
+    # クリーン側のファイル名を基準にペアリング
+    rows = []
+    clean_files = sorted(clean_dir.rglob("*.wav"))
+    if not clean_files:
+        print(f"No clean wav files found in {clean_dir}")
+        return
+
+    for clean_path in clean_files:
+        rel = clean_path.relative_to(clean_dir)
+        den_path = denoised_dir / rel.name.replace(".wav", "_den_16k.wav")
+        # ↑ ファイル名ルールはあなたのプロジェクトに合わせて変更してください
+
+        if not den_path.exists():
+            # 見つからない場合はスキップ
+            continue
+
+        try:
+            metrics = eval_pair(clean_path, den_path)
+        except Exception as e:
+            print(f"Error on {clean_path} vs {den_path}: {e}")
+            continue
+
+        rows.append(metrics)
+
+    if not rows:
+        print("No pairs evaluated.")
+        return
+
+    with out_csv.open("w", newline="", encoding="utf-8") as f:
+        fieldnames = list(rows[0].keys())
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    print(f"Done. Metrics written to {out_csv}")
+
+
+if __name__ == "__main__":
+    main()

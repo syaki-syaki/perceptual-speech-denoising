@@ -1,0 +1,113 @@
+#!/usr/bin/env python
+import argparse
+import csv
+import os
+from pathlib import Path
+
+import librosa
+import soundfile as sf
+
+
+def preprocess_file(
+    input_path: Path,
+    output_path: Path,
+    target_sr: int = 16000,
+) -> dict:
+    """1ファイルの前処理を行い、メタ情報を返します。"""
+    y, sr = librosa.load(input_path, sr=None, mono=True)
+
+    # リサンプリング
+    if sr != target_sr:
+        y = librosa.resample(y, orig_sr=sr, target_sr=target_sr)
+        sr = target_sr
+
+    # 正規化（安全のためクリップ）
+    max_abs = max(1e-9, float(abs(y).max()))
+    y = y / max_abs
+    y = y.clip(-1.0, 1.0)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    sf.write(output_path, y, sr)
+
+    duration_sec = len(y) / sr
+    return {
+        "input": str(input_path),
+        "output": str(output_path),
+        "duration_sec": duration_sec,
+        "sample_rate": sr,
+    }
+
+
+def collect_wavs(input_dir: Path):
+    return sorted(input_dir.rglob("*.wav"))
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Speech preprocessing script")
+    parser.add_argument(
+        "--input_dir",
+        type=str,
+        default="data/raw",
+        help="入力wavディレクトリ",
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default="data/processed",
+        help="前処理後wavの出力ディレクトリ",
+    )
+    parser.add_argument(
+        "--meta_csv",
+        type=str,
+        default="meta/segments.csv",
+        help="メタ情報を書き出すCSVパス",
+    )
+    parser.add_argument(
+        "--sr",
+        type=int,
+        default=16000,
+        help="ターゲットサンプリング周波数",
+    )
+    args = parser.parse_args()
+
+    input_dir = Path(args.input_dir)
+    output_dir = Path(args.output_dir)
+    meta_path = Path(args.meta_csv)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
+
+    wav_files = collect_wavs(input_dir)
+    if not wav_files:
+        print(f"No wav files found in {input_dir}")
+        return
+
+    print(f"Found {len(wav_files)} wav files")
+
+    rows = []
+    for i, wav_path in enumerate(wav_files, start=1):
+        rel = wav_path.relative_to(input_dir)
+        out_path = output_dir / rel
+        info = preprocess_file(wav_path, out_path, target_sr=args.sr)
+        rows.append(
+            {
+                "input": info["input"],
+                "output": info["output"],
+                "duration_sec": f"{info['duration_sec']:.3f}",
+                "sample_rate": info["sample_rate"],
+            }
+        )
+        if i % 10 == 0:
+            print(f"Processed {i}/{len(wav_files)}")
+
+    with meta_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(
+            f, fieldnames=["input", "output", "duration_sec", "sample_rate"]
+        )
+        writer.writeheader()
+        writer.writerows(rows)
+
+    print(f"Done. Meta written to {meta_path}")
+
+
+if __name__ == "__main__":
+    main()
