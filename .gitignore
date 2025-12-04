@@ -1,9 +1,2 @@
-﻿# Python 仮想環境
-.venv/
-venv/
-
-# Python キャッシュ
+.DS_Store
 __pycache__/
-*.pyc
-data/
-results/
