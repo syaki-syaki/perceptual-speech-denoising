@@ -1,2 +1,9 @@
 .DS_Store
 __pycache__/
+.venv/
+data/
+demo_data/
+weights/
+results/
+old_project_backup/data/
+.data_backup/
